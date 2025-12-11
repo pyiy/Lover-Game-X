@@ -17,15 +17,6 @@ import {
   Shuffle,
 } from "lucide-react"
 
-interface PlayerState {
-  id: string
-  name: string
-  gender: "male" | "female"
-  position: number
-  isSkipped: boolean
-  seatIndex: number
-}
-
 interface GameBoardProps {
   cells: GameCell[]
   endpointCells: GameCell[]
@@ -34,9 +25,11 @@ interface GameBoardProps {
     subtitle: string
     reward: string
   }
-  playerPositions: { [position: number]: PlayerState[] }
-  currentPlayerIndex: number
+  player1Position: number
+  player2Position: number
+  currentPlayer: 1 | 2
   onCellClick?: (index: number) => void
+  compactMode?: boolean
 }
 
 const getCellIcon = (type: CellType) => {
@@ -94,23 +87,15 @@ const getCellColor = (type: CellType) => {
   }
 }
 
-const getPlayerColor = (gender: "male" | "female", index: number) => {
-  if (gender === "male") {
-    const colors = ["bg-blue-500", "bg-cyan-500", "bg-indigo-500", "bg-sky-500"]
-    return colors[index % colors.length]
-  } else {
-    const colors = ["bg-pink-500", "bg-rose-500", "bg-fuchsia-500", "bg-red-400"]
-    return colors[index % colors.length]
-  }
-}
-
 export function GameBoard({
   cells,
   endpointCells,
   endpointContent,
-  playerPositions,
-  currentPlayerIndex,
+  player1Position,
+  player2Position,
+  currentPlayer,
   onCellClick,
+  compactMode = false,
 }: GameBoardProps) {
   const totalCells = cells.length + endpointCells.length + 2
 
@@ -121,30 +106,38 @@ export function GameBoard({
     let index = 0
 
     // 外圈 - 顺时针
+    // 顶行 (左到右)
     for (let col = 0; col < cols && index < totalCells; col++) {
       layout.push({ row: 0, col, index: index++ })
     }
+    // 右列 (上到下)
     for (let row = 1; row < rows && index < totalCells; row++) {
       layout.push({ row, col: cols - 1, index: index++ })
     }
+    // 底行 (右到左)
     for (let col = cols - 2; col >= 0 && index < totalCells; col--) {
       layout.push({ row: rows - 1, col, index: index++ })
     }
+    // 左列 (下到上)
     for (let row = rows - 2; row > 0 && index < totalCells; row--) {
       layout.push({ row, col: 0, index: index++ })
     }
 
-    // 内圈
+    // 内圈 - 继续顺时针（如果格子还没用完）
     if (index < totalCells) {
+      // 第二行 (左到右)
       for (let col = 1; col < cols - 1 && index < totalCells; col++) {
         layout.push({ row: 1, col, index: index++ })
       }
+      // 倒数第二列 (上到下)
       for (let row = 2; row < rows - 1 && index < totalCells; row++) {
         layout.push({ row, col: cols - 2, index: index++ })
       }
+      // 倒数第二行 (右到左)
       for (let col = cols - 3; col >= 1 && index < totalCells; col--) {
         layout.push({ row: rows - 2, col, index: index++ })
       }
+      // 第二列 (下到上)
       for (let row = rows - 3; row > 1 && index < totalCells; row--) {
         layout.push({ row, col: 1, index: index++ })
       }
@@ -179,25 +172,9 @@ export function GameBoard({
     return { content: "", type: "normal" as const, player: "both" as const }
   }
 
-  const getPlayersAtPosition = (position: number): PlayerState[] => {
-    return playerPositions[position] || []
-  }
-
-  const allPlayers = Object.values(playerPositions).flat()
-  const currentPlayer = allPlayers.find((_, i) => {
-    let count = 0
-    for (const players of Object.values(playerPositions)) {
-      for (const p of players) {
-        if (count === currentPlayerIndex) return p.id === allPlayers[currentPlayerIndex]?.id
-        count++
-      }
-    }
-    return false
-  })
-
   return (
     <div className="relative w-full max-w-5xl mx-auto">
-      {/* 中心标题 */}
+      {/* Game Title - 居中显示，移动端隐藏或缩小 */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center z-10 bg-gradient-to-br from-amber-50 to-rose-50 p-2 md:p-6 rounded-xl md:rounded-2xl shadow-xl border-2 border-amber-200">
         <h2 className="text-sm md:text-2xl font-bold text-rose-600 flex items-center gap-1 md:gap-2 justify-center">
           <Heart className="w-3 h-3 md:w-6 md:h-6 fill-rose-500" />
@@ -205,12 +182,12 @@ export function GameBoard({
           <span className="sm:hidden">飞行棋</span>
           <Heart className="w-3 h-3 md:w-6 md:h-6 fill-rose-500" />
         </h2>
-        <p className="text-xs md:text-lg text-amber-700 font-medium mt-0.5 md:mt-1">多人版 V2.0</p>
+        <p className="text-xs md:text-lg text-amber-700 font-medium mt-0.5 md:mt-1">双人版 V2.0</p>
         <div className="mt-1 md:mt-3 text-[10px] md:text-sm text-muted-foreground max-w-[120px] md:max-w-[200px]">
           <p className="font-medium text-rose-500 line-clamp-2">{endpointContent.reward}</p>
         </div>
 
-        {/* 图例 - 桌面端 */}
+        {/* 图例 - 移动端隐藏 */}
         <div className="hidden md:grid mt-4 grid-cols-3 gap-1 text-[10px]">
           <div className="flex items-center gap-1">
             <div className="w-3 h-3 rounded bg-blue-400" />
@@ -239,7 +216,7 @@ export function GameBoard({
         </div>
       </div>
 
-      {/* 棋盘网格 */}
+      {/* Board Grid - 10x8 */}
       <div className="grid grid-cols-10 gap-[2px] md:gap-1 p-1 md:p-4 bg-gradient-to-br from-amber-100 to-rose-100 rounded-xl md:rounded-2xl shadow-2xl border-2 md:border-4 border-amber-300">
         {Array.from({ length: 8 }).map((_, row) =>
           Array.from({ length: 10 }).map((_, col) => {
@@ -250,7 +227,8 @@ export function GameBoard({
             }
 
             const cellContent = getCellContent(cell.index)
-            const playersHere = getPlayersAtPosition(cell.index)
+            const hasPlayer1 = player1Position === cell.index
+            const hasPlayer2 = player2Position === cell.index
 
             return (
               <div
@@ -267,33 +245,35 @@ export function GameBoard({
                 {/* 格子内容 */}
                 <div className="flex flex-col items-center justify-center">
                   <div className="opacity-80">{getCellIcon(cellContent.type)}</div>
+                  {/* 桌面端显示文字 */}
                   <span className="hidden md:block text-[7px] leading-tight line-clamp-2 font-medium px-0.5 mt-0.5">
                     {cellContent.content}
                   </span>
                 </div>
 
-                {playersHere.length > 0 && (
-                  <div className="absolute -top-0.5 -right-0.5 md:-top-1 md:-right-1 flex flex-wrap gap-0.5 max-w-[24px] md:max-w-[40px]">
-                    {playersHere.map((player, idx) => {
-                      const isCurrentPlayer = player.seatIndex === currentPlayerIndex
-                      return (
-                        <div
-                          key={player.id}
-                          className={cn(
-                            "w-3 h-3 md:w-5 md:h-5 rounded-full border border-white md:border-2 flex items-center justify-center shadow-lg",
-                            getPlayerColor(player.gender, player.seatIndex),
-                            isCurrentPlayer && "animate-pulse ring-1 md:ring-2 ring-white",
-                          )}
-                          title={player.name}
-                        >
-                          <span className="text-[6px] md:text-[8px] text-white font-bold">
-                            {player.gender === "male" ? "♂" : "♀"}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
+                {/* 玩家标识 */}
+                <div className="absolute -top-0.5 -right-0.5 md:-top-1 md:-right-1 flex gap-0.5">
+                  {hasPlayer1 && (
+                    <div
+                      className={cn(
+                        "w-3 h-3 md:w-5 md:h-5 rounded-full bg-blue-500 border border-white md:border-2 flex items-center justify-center shadow-lg",
+                        currentPlayer === 1 && "animate-pulse ring-1 md:ring-2 ring-blue-300",
+                      )}
+                    >
+                      <span className="text-[6px] md:text-[8px] text-white font-bold">♂</span>
+                    </div>
+                  )}
+                  {hasPlayer2 && (
+                    <div
+                      className={cn(
+                        "w-3 h-3 md:w-5 md:h-5 rounded-full bg-pink-500 border border-white md:border-2 flex items-center justify-center shadow-lg",
+                        currentPlayer === 2 && "animate-pulse ring-1 md:ring-2 ring-pink-300",
+                      )}
+                    >
+                      <span className="text-[6px] md:text-[8px] text-white font-bold">♀</span>
+                    </div>
+                  )}
+                </div>
 
                 {/* 格子编号 */}
                 <span className="absolute bottom-0 right-0.5 text-[4px] md:text-[6px] opacity-40 font-mono">

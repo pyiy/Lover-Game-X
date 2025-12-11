@@ -1,24 +1,17 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { GameBoard } from "@/components/game-board"
 import { Dice } from "@/components/dice"
 import { PlayerPanel } from "@/components/player-panel"
 import { TaskModal } from "@/components/task-modal"
 import { ConfigModal } from "@/components/config-modal"
 import { WinnerModal } from "@/components/winner-modal"
-import { GameTimer, type TimerState } from "@/components/game-timer"
+import { GameTimer } from "@/components/game-timer"
 import { RoomManager } from "@/components/room-manager"
 import { SyncIndicator } from "@/components/sync-indicator"
-import { useGameSync, type SyncState, type PlayerState } from "@/hooks/use-game-sync"
-import {
-  type GameCell,
-  type GameConfig,
-  defaultGameConfig,
-  shuffleArray,
-  generateBoard,
-  getCellContentForPlayer,
-} from "@/lib/game-data"
+import { useGameSync, type SyncState } from "@/hooks/use-game-sync"
+import { type GameCell, type GameConfig, defaultGameConfig, shuffleArray, generateBoard } from "@/lib/game-data"
 import { Button } from "@/components/ui/button"
 import { Settings, RotateCcw, Heart, Loader2 } from "lucide-react"
 
@@ -27,51 +20,54 @@ export default function GamePage() {
   const [cells, setCells] = useState<GameCell[]>([])
   const [endpointCells, setEndpointCells] = useState<GameCell[]>([])
 
-  // 多玩家状态
-  const [players, setPlayers] = useState<PlayerState[]>([])
-  const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0)
+  const [player1Position, setPlayer1Position] = useState(0)
+  const [player2Position, setPlayer2Position] = useState(0)
+  const [currentPlayer, setCurrentPlayer] = useState<1 | 2>(1)
   const [currentTask, setCurrentTask] = useState<GameCell | null>(null)
+  const [currentTaskIndex, setCurrentTaskIndex] = useState<number | null>(null)
   const [showConfig, setShowConfig] = useState(false)
   const [winner, setWinner] = useState<string | null>(null)
   const [isRolling, setIsRolling] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [skipNextTurn, setSkipNextTurn] = useState<{ player1: boolean; player2: boolean }>({
+    player1: false,
+    player2: false,
+  })
   const [canRollAgain, setCanRollAgain] = useState(false)
   const [previewCell, setPreviewCell] = useState<{ cell: GameCell; index: number } | null>(null)
-  const [timerState, setTimerState] = useState<TimerState>({ duration: 60, timeLeft: 60, isRunning: false })
 
   const [syncEnabled, setSyncEnabled] = useState<boolean | null>(null)
   const [roomId, setRoomId] = useState<string | null>(null)
   const [gameStarted, setGameStarted] = useState(false)
-  const [playerId] = useState(() => `player_${Math.random().toString(36).substring(2, 10)}`)
-  const [playerName, setPlayerName] = useState("")
-  const [mySeatIndex, setMySeatIndex] = useState<number | null>(null)
+  const [isWaitingForPlayer2, setIsWaitingForPlayer2] = useState(false)
+  const [player2Joined, setPlayer2Joined] = useState(false)
+  const [isHost, setIsHost] = useState(false)
   const isLocalUpdateRef = useRef(false)
 
-  const { isSyncing, isConnected, remoteState, roomConfig, pushState, updateSeat, setRemoteState, setRoomConfig } =
-    useGameSync(roomId, !!roomId && gameStarted)
+  const [player1Gender, setPlayer1Gender] = useState<"male" | "female">("male")
+  const [player2Gender, setPlayer2Gender] = useState<"male" | "female">("female")
+
+  const [timerSeconds, setTimerSeconds] = useState(60)
+  const [timerRunning, setTimerRunning] = useState(false)
+  const [timerDuration, setTimerDuration] = useState(60)
+
+  const [taskChangedCells, setTaskChangedCells] = useState<{ [cellIndex: number]: boolean }>({})
+  const [myPlayerNumber, setMyPlayerNumber] = useState<1 | 2 | null>(null)
+
+  const { isSyncing, isConnected, remoteState, pushState, setRemoteState, fetchStateImmediately } = useGameSync(
+    roomId,
+    !!roomId && gameStarted,
+  )
 
   const totalCells = cells.length + endpointCells.length + 2
 
-  const isMyTurn = useMemo(() => {
-    if (!roomId || !gameStarted) return true // 本地模式始终可以操作
-    if (players.length === 0) return false
-    const currentPlayer = players[currentPlayerIndex]
-    if (!currentPlayer) return false
-    return currentPlayer.id === playerId
-  }, [roomId, gameStarted, players, currentPlayerIndex, playerId])
-
-  const currentPlayerGender = useMemo(() => {
-    if (players.length === 0) return undefined
-    return players[currentPlayerIndex]?.gender
-  }, [players, currentPlayerIndex])
-
-  // 检查同步是否可用
   useEffect(() => {
     async function checkSync() {
       try {
         const res = await fetch("/api/sync-status")
         const data = await res.json()
         setSyncEnabled(data.syncEnabled)
+
         if (!data.syncEnabled) {
           setGameStarted(true)
         }
@@ -83,7 +79,6 @@ export default function GamePage() {
     checkSync()
   }, [])
 
-  // 加载配置
   const loadConfig = useCallback(async () => {
     try {
       const response = await fetch("/api/game-config")
@@ -98,132 +93,152 @@ export default function GamePage() {
     return defaultGameConfig
   }, [])
 
-  // 初始化本地游戏
-  const initLocalGame = useCallback((gameConfig: GameConfig) => {
+  const initGame = useCallback((gameConfig: GameConfig) => {
     const board = generateBoard(gameConfig)
     setCells(board)
     setEndpointCells(shuffleArray([...gameConfig.endpointCells]))
-
-    // 本地模式默认两人
-    setPlayers([
-      { id: "local_1", name: "玩家1", gender: "male", position: 0, isSkipped: false, seatIndex: 0 },
-      { id: "local_2", name: "玩家2", gender: "female", position: 0, isSkipped: false, seatIndex: 1 },
-    ])
-    setCurrentPlayerIndex(0)
+    setPlayer1Position(0)
+    setPlayer2Position(0)
+    setCurrentPlayer(1)
     setWinner(null)
     setCurrentTask(null)
+    setCurrentTaskIndex(null)
+    setSkipNextTurn({ player1: false, player2: false })
     setCanRollAgain(false)
     setIsLoading(false)
+    setTaskChangedCells({})
   }, [])
 
-  // 初始加载
   useEffect(() => {
-    loadConfig().then(initLocalGame)
-  }, [loadConfig, initLocalGame])
+    loadConfig().then(initGame)
+  }, [loadConfig, initGame])
 
   useEffect(() => {
-    if (remoteState && !isLocalUpdateRef.current) {
-      // 立即更新关键游戏状态
-      if (remoteState.players?.length > 0) setPlayers(remoteState.players)
-      setCurrentPlayerIndex(remoteState.currentPlayerIndex)
+    if (remoteState) {
+      // Always apply remote state - server is the source of truth
+      setPlayer1Position(remoteState.player1Position)
+      setPlayer2Position(remoteState.player2Position)
+      setCurrentPlayer(remoteState.currentPlayer)
+      setSkipNextTurn(remoteState.skipNextTurn)
       setCanRollAgain(remoteState.canRollAgain)
       setWinner(remoteState.winner)
-      if (remoteState.cells?.length > 0) setCells(remoteState.cells)
-      if (remoteState.endpointCells?.length > 0) setEndpointCells(remoteState.endpointCells)
-      if (remoteState.timer) setTimerState(remoteState.timer)
-    }
-    isLocalUpdateRef.current = false
-  }, [remoteState])
-
-  // 检查是否所有座位已满并开始游戏
-  useEffect(() => {
-    if (roomConfig && roomId && gameStarted) {
-      const allSeated = roomConfig.seats.every((s) => s.playerId !== null)
-      if (allSeated && players.length === 0) {
-        // 根据座位生成玩家列表
-        const newPlayers: PlayerState[] = roomConfig.seats.map((seat) => ({
-          id: seat.playerId!,
-          name: seat.playerName || `玩家${seat.index + 1}`,
-          gender: seat.gender,
-          position: 0,
-          isSkipped: false,
-          seatIndex: seat.index,
-        }))
-        setPlayers(newPlayers)
-
-        // 同步到服务器
-        const state: SyncState = {
-          players: newPlayers,
-          currentPlayerIndex: 0,
-          canRollAgain: false,
-          winner: null,
-          cells,
-          endpointCells,
-          timer: timerState,
-          version: 1,
+      if (remoteState.cells && remoteState.cells.length > 0) setCells(remoteState.cells)
+      if (remoteState.endpointCells && remoteState.endpointCells.length > 0) setEndpointCells(remoteState.endpointCells)
+      if (remoteState.timerSeconds !== undefined) setTimerSeconds(remoteState.timerSeconds)
+      if (remoteState.timerRunning !== undefined) setTimerRunning(remoteState.timerRunning)
+      if (remoteState.timerDuration !== undefined) setTimerDuration(remoteState.timerDuration)
+      if (remoteState.player1Gender) setPlayer1Gender(remoteState.player1Gender)
+      if (remoteState.player2Gender) setPlayer2Gender(remoteState.player2Gender)
+      if (remoteState.taskChangedCells) setTaskChangedCells(remoteState.taskChangedCells)
+      if (remoteState.player2Joined !== undefined) {
+        setPlayer2Joined(remoteState.player2Joined)
+        if (remoteState.player2Joined) {
+          setIsWaitingForPlayer2(false)
         }
-        pushState(state)
+      }
+      if (remoteState.config) {
+        setConfig(remoteState.config)
       }
     }
-  }, [roomConfig, roomId, gameStarted, players.length, cells, endpointCells, timerState, pushState])
+  }, [remoteState])
 
-  const syncState = useCallback(() => {
-    if (!roomId || !gameStarted) return
+  const syncStateWithOverrides = useCallback(
+    (overrides: Partial<SyncState> = {}) => {
+      if (!roomId || !gameStarted) return
 
-    isLocalUpdateRef.current = true
-    const state: SyncState = {
-      players,
-      currentPlayerIndex,
+      // Remove isRolling from overrides if present
+      const { isRolling: _isRolling, ...cleanOverrides } = overrides as any
+
+      const finalState: SyncState = {
+        player1Position: overrides.player1Position ?? player1Position,
+        player2Position: overrides.player2Position ?? player2Position,
+        currentPlayer: overrides.currentPlayer ?? currentPlayer,
+        skipNextTurn: overrides.skipNextTurn ?? skipNextTurn,
+        canRollAgain: overrides.canRollAgain ?? canRollAgain,
+        winner: overrides.winner ?? winner,
+        cells: overrides.cells ?? cells,
+        endpointCells: overrides.endpointCells ?? endpointCells,
+        timerSeconds: overrides.timerSeconds ?? timerSeconds,
+        timerRunning: overrides.timerRunning ?? timerRunning,
+        timerDuration: overrides.timerDuration ?? timerDuration,
+        player1Gender: overrides.player1Gender ?? player1Gender,
+        player2Gender: overrides.player2Gender ?? player2Gender,
+        taskChangedCells: overrides.taskChangedCells ?? taskChangedCells,
+        player2Joined: overrides.player2Joined ?? player2Joined,
+        config: overrides.config ?? config,
+      }
+
+      pushState(finalState)
+    },
+    [
+      roomId,
+      gameStarted,
+      player1Position,
+      player2Position,
+      currentPlayer,
+      skipNextTurn,
       canRollAgain,
       winner,
       cells,
       endpointCells,
-      timer: timerState,
-    }
-    pushState(state)
-  }, [
-    roomId,
-    gameStarted,
-    players,
-    currentPlayerIndex,
-    canRollAgain,
-    winner,
-    cells,
-    endpointCells,
-    timerState,
-    pushState,
-  ])
+      timerSeconds,
+      timerRunning,
+      timerDuration,
+      player1Gender,
+      player2Gender,
+      taskChangedCells,
+      player2Joined,
+      config,
+      pushState,
+    ],
+  )
 
-  // 创建房间
-  const handleCreateRoom = async (roomCfg: { maleCount: number; femaleCount: number }): Promise<string | null> => {
+  const syncState = useCallback(() => {
+    syncStateWithOverrides({})
+  }, [syncStateWithOverrides])
+
+  const handleCreateRoom = async (selectedGender: "male" | "female"): Promise<string | null> => {
     try {
-      const board = generateBoard(config)
-      const epCells = shuffleArray([...config.endpointCells])
+      const p1Gender = selectedGender
+      const p2Gender = selectedGender === "male" ? "female" : "male"
+
+      setPlayer1Gender(p1Gender)
+      setPlayer2Gender(p2Gender)
+      setIsHost(true)
+      setMyPlayerNumber(1)
 
       const state: SyncState = {
-        players: [],
-        currentPlayerIndex: 0,
+        player1Position: 0,
+        player2Position: 0,
+        currentPlayer: 1,
+        skipNextTurn: { player1: false, player2: false },
         canRollAgain: false,
         winner: null,
-        cells: board,
-        endpointCells: epCells,
-        timer: { duration: 60, timeLeft: 60, isRunning: false },
-        version: 0,
+        cells,
+        endpointCells,
+        isRolling: false,
+        timerSeconds: 60,
+        timerRunning: false,
+        timerDuration: 60,
+        player1Gender: p1Gender,
+        player2Gender: p2Gender,
+        taskChangedCells: {},
+        player2Joined: false,
+        config: config,
       }
 
       const res = await fetch("/api/room", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state, roomConfig: roomCfg }),
+        body: JSON.stringify({ state }),
       })
 
       if (res.ok) {
         const data = await res.json()
         setRoomId(data.roomId)
-        setRoomConfig(data.roomConfig)
-        setCells(board)
-        setEndpointCells(epCells)
         setGameStarted(true)
+        setIsWaitingForPlayer2(true)
+        setPlayer2Joined(false)
         return data.roomId
       }
     } catch (error) {
@@ -232,59 +247,79 @@ export default function GamePage() {
     return null
   }
 
-  // 加入房间
-  const handleJoinRoom = async (id: string): Promise<{ success: boolean; roomConfig?: any }> => {
+  const handleJoinRoom = async (id: string): Promise<boolean> => {
     try {
       const res = await fetch(`/api/room?roomId=${id}`)
       const data = await res.json()
 
       if (data.exists && data.state) {
         setRoomId(id.toUpperCase())
-        setRoomConfig(data.roomConfig)
         setRemoteState(data.state)
-        if (data.state.players?.length > 0) setPlayers(data.state.players)
-        setCurrentPlayerIndex(data.state.currentPlayerIndex)
+        setPlayer1Position(data.state.player1Position)
+        setPlayer2Position(data.state.player2Position)
+        setCurrentPlayer(data.state.currentPlayer)
+        setSkipNextTurn(data.state.skipNextTurn)
         setCanRollAgain(data.state.canRollAgain)
         setWinner(data.state.winner)
-        if (data.state.cells?.length > 0) setCells(data.state.cells)
-        if (data.state.endpointCells?.length > 0) setEndpointCells(data.state.endpointCells)
-        if (data.state.timer) setTimerState(data.state.timer)
+        if (data.state.cells.length > 0) setCells(data.state.cells)
+        if (data.state.endpointCells.length > 0) setEndpointCells(data.state.endpointCells)
+        if (data.state.player1Gender) setPlayer1Gender(data.state.player1Gender)
+        if (data.state.player2Gender) setPlayer2Gender(data.state.player2Gender)
+        if (data.state.timerSeconds !== undefined) setTimerSeconds(data.state.timerSeconds)
+        if (data.state.timerRunning !== undefined) setTimerRunning(data.state.timerRunning)
+        if (data.state.timerDuration !== undefined) setTimerDuration(data.state.timerDuration)
+        if (data.state.taskChangedCells) setTaskChangedCells(data.state.taskChangedCells)
+        if (data.state.config) {
+          setConfig(data.state.config)
+        }
         setGameStarted(true)
-        return { success: true, roomConfig: data.roomConfig }
+        setPlayer2Joined(true)
+        setIsWaitingForPlayer2(false)
+        setIsHost(false)
+        setMyPlayerNumber(2)
+
+        // 通知房主玩家2已加入
+        const updatedState: SyncState = {
+          ...data.state,
+          player2Joined: true,
+        }
+        await fetch("/api/game-sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomId: id.toUpperCase(), state: updatedState }),
+        })
+
+        return true
       }
     } catch (error) {
       console.error("加入房间失败:", error)
     }
-    return { success: false }
+    return false
   }
 
-  // 本地游戏
+  const handleCheckPlayer2Joined = async (): Promise<boolean> => {
+    if (!roomId) return false
+    const state = await fetchStateImmediately()
+    if (state && state.player2Joined) {
+      setPlayer2Joined(true)
+      setIsWaitingForPlayer2(false)
+      return true
+    }
+    return false
+  }
+
   const handlePlayLocal = () => {
     setRoomId(null)
-    initLocalGame(config)
     setGameStarted(true)
+    setPlayer2Joined(true)
+    setIsWaitingForPlayer2(false)
   }
 
-  // 选择座位
-  const handleSeatSelected = async (seatIndex: number, gender: "male" | "female") => {
-    if (!roomId) return
-
-    const name = playerName || `玩家${Math.floor(Math.random() * 10000)}`
-    setPlayerName(name)
-
-    const success = await updateSeat(seatIndex, playerId, name)
-    if (success) {
-      setMySeatIndex(seatIndex)
-    }
-  }
-
-  // 保存配置
   const handleConfigSave = (newConfig: GameConfig) => {
     setConfig(newConfig)
-    initLocalGame(newConfig)
+    initGame(newConfig)
   }
 
-  // 获取格子内容
   const getCellContent = useCallback(
     (index: number): GameCell | null => {
       if (index === 0 || index >= totalCells - 1) return null
@@ -307,7 +342,6 @@ export default function GamePage() {
     [cells, endpointCells, totalCells],
   )
 
-  // 点击格子预览
   const handleCellClick = useCallback(
     (index: number) => {
       const cell = getCellContent(index)
@@ -318,31 +352,78 @@ export default function GamePage() {
     [getCellContent],
   )
 
-  const handleDiceRoll = (value: number) => {
-    if (players.length === 0) return
-    if (!isMyTurn && roomId) return // 多端模式下不是自己的回合时不能投骰子
+  const getCurrentPlayerGender = useCallback(() => {
+    return currentPlayer === 1 ? player1Gender : player2Gender
+  }, [currentPlayer, player1Gender, player2Gender])
 
-    const currentPlayer = players[currentPlayerIndex]
-    if (!currentPlayer) return
-
-    if (currentPlayer.isSkipped) {
-      // 跳过当前玩家
-      const updatedPlayers = [...players]
-      updatedPlayers[currentPlayerIndex] = { ...currentPlayer, isSkipped: false }
-      setPlayers(updatedPlayers)
-      setCurrentPlayerIndex((currentPlayerIndex + 1) % players.length)
-      setTimeout(() => {
-        isLocalUpdateRef.current = true
-        pushState({
-          players: updatedPlayers,
-          currentPlayerIndex: (currentPlayerIndex + 1) % players.length,
-          canRollAgain: false,
-          winner: null,
+  const handleTimerChange = useCallback(
+    (seconds: number, running: boolean, duration: number) => {
+      setTimerSeconds(seconds)
+      setTimerRunning(running)
+      setTimerDuration(duration)
+      // Sync immediately when timer changes
+      if (roomId && gameStarted) {
+        const state: SyncState = {
+          player1Position,
+          player2Position,
+          currentPlayer,
+          skipNextTurn,
+          canRollAgain,
+          winner,
           cells,
           endpointCells,
-          timer: timerState,
-        })
-      }, 50)
+          timerSeconds: seconds,
+          timerRunning: running,
+          timerDuration: duration,
+          player1Gender,
+          player2Gender,
+          taskChangedCells,
+          player2Joined,
+          config: config,
+        }
+        pushState(state)
+      }
+    },
+    [
+      roomId,
+      gameStarted,
+      player1Position,
+      player2Position,
+      currentPlayer,
+      skipNextTurn,
+      canRollAgain,
+      winner,
+      cells,
+      endpointCells,
+      player1Gender,
+      player2Gender,
+      taskChangedCells,
+      player2Joined,
+      config,
+      pushState,
+    ],
+  )
+
+  const handleTaskChange = useCallback(
+    (newCell: GameCell) => {
+      if (currentTaskIndex !== null) {
+        setCurrentTask(newCell)
+        setTaskChangedCells((prev) => ({ ...prev, [currentTaskIndex]: true }))
+      }
+    },
+    [currentTaskIndex],
+  )
+
+  const handleDiceRoll = (value: number) => {
+    // In online mode, turn control is handled by canCurrentDeviceRoll which checks currentPlayer === myPlayerNumber
+    if (isRolling) return
+
+    const skipKey = currentPlayer === 1 ? "player1" : "player2"
+    if (skipNextTurn[skipKey]) {
+      setSkipNextTurn((prev) => ({ ...prev, [skipKey]: false }))
+      const nextPlayer = currentPlayer === 1 ? 2 : 1
+      setCurrentPlayer(nextPlayer)
+      setTimeout(() => syncStateWithOverrides({ currentPlayer: nextPlayer }), 100)
       return
     }
 
@@ -350,162 +431,149 @@ export default function GamePage() {
     setCanRollAgain(false)
     setPreviewCell(null)
 
-    let newPos = currentPlayer.position + value
+    if (roomId && gameStarted) {
+      syncStateWithOverrides({})
+    }
+
+    const currentPos = currentPlayer === 1 ? player1Position : player2Position
+    let newPos = currentPos + value
 
     if (newPos >= totalCells - 1) {
       newPos = totalCells - 1
-      setWinner(currentPlayer.name)
+      const winnerName =
+        currentPlayer === 1
+          ? `玩家1 (${player1Gender === "male" ? "♂" : "♀"})`
+          : `玩家2 (${player2Gender === "male" ? "♂" : "♀"})`
+      setWinner(winnerName)
     }
 
-    const updatedPlayers = [...players]
-    updatedPlayers[currentPlayerIndex] = { ...currentPlayer, position: newPos }
-    setPlayers(updatedPlayers)
+    const newPlayer1Position = currentPlayer === 1 ? newPos : player1Position
+    const newPlayer2Position = currentPlayer === 2 ? newPos : player2Position
+
+    if (currentPlayer === 1) {
+      setPlayer1Position(newPos)
+    } else {
+      setPlayer2Position(newPos)
+    }
 
     setTimeout(() => {
-      let task = getCellContent(newPos)
+      const task = getCellContent(newPos)
       if (task && !winner) {
-        // 根据玩家性别获取适合的任务
-        task = getCellContentForPlayer(task, currentPlayer.gender, config)
         setCurrentTask(task)
+        setCurrentTaskIndex(newPos)
+        syncStateWithOverrides({
+          player1Position: newPlayer1Position,
+          player2Position: newPlayer2Position,
+        })
       } else {
-        const nextIndex = (currentPlayerIndex + 1) % players.length
-        setCurrentPlayerIndex(nextIndex)
-        isLocalUpdateRef.current = true
-        pushState({
-          players: updatedPlayers,
-          currentPlayerIndex: nextIndex,
-          canRollAgain: false,
-          winner: newPos >= totalCells - 1 ? currentPlayer.name : null,
-          cells,
-          endpointCells,
-          timer: timerState,
+        const nextPlayer = currentPlayer === 1 ? 2 : 1
+        setCurrentPlayer(nextPlayer)
+        setIsRolling(false)
+        syncStateWithOverrides({
+          currentPlayer: nextPlayer,
+          player1Position: newPlayer1Position,
+          player2Position: newPlayer2Position,
         })
       }
-      setIsRolling(false)
     }, 500)
   }
 
-  // 完成任务
   const handleTaskComplete = (effect?: GameCell["effect"]) => {
     setCurrentTask(null)
+    setCurrentTaskIndex(null)
+    setIsRolling(false)
 
-    const updatedPlayers = [...players]
-    const currentPlayer = players[currentPlayerIndex]
-    let nextIndex = currentPlayerIndex
+    let newPlayer1Position = player1Position
+    let newPlayer2Position = player2Position
     let shouldRollAgain = false
 
-    if (effect && players.length > 0 && currentPlayer) {
+    if (effect) {
+      const currentPos = currentPlayer === 1 ? player1Position : player2Position
+
       switch (effect.type) {
         case "move":
           if (effect.value) {
-            let newPos = effect.value === -999 ? 0 : currentPlayer.position + effect.value
+            let newPos = effect.value === -999 ? 0 : currentPos + effect.value
             newPos = Math.max(0, Math.min(newPos, totalCells - 1))
-            updatedPlayers[currentPlayerIndex] = { ...currentPlayer, position: newPos }
-            setPlayers(updatedPlayers)
+            if (currentPlayer === 1) {
+              setPlayer1Position(newPos)
+              newPlayer1Position = newPos
+            } else {
+              setPlayer2Position(newPos)
+              newPlayer2Position = newPos
+            }
           }
           break
         case "skip":
-          updatedPlayers[currentPlayerIndex] = { ...currentPlayer, isSkipped: true }
-          setPlayers(updatedPlayers)
+          const skipKey = currentPlayer === 1 ? "player1" : "player2"
+          setSkipNextTurn((prev) => ({ ...prev, [skipKey]: true }))
           break
         case "again":
-          shouldRollAgain = true
           setCanRollAgain(true)
           setIsRolling(false)
-          break
+          shouldRollAgain = true
+          setTimeout(
+            () =>
+              syncStateWithOverrides({
+                canRollAgain: true,
+                isRolling: false,
+              }),
+            100,
+          )
+          return
         case "swap":
-          // 与下一个玩家交换位置
-          const swapIndex = (currentPlayerIndex + 1) % players.length
-          const tempPos = currentPlayer.position
-          updatedPlayers[currentPlayerIndex] = { ...currentPlayer, position: players[swapIndex].position }
-          updatedPlayers[swapIndex] = { ...players[swapIndex], position: tempPos }
-          setPlayers(updatedPlayers)
+          const temp = player1Position
+          setPlayer1Position(player2Position)
+          setPlayer2Position(temp)
+          newPlayer1Position = player2Position
+          newPlayer2Position = temp
           break
       }
     }
 
-    if (!winner && !shouldRollAgain) {
-      nextIndex = (currentPlayerIndex + 1) % players.length
-      setCurrentPlayerIndex(nextIndex)
-    }
-
-    setTimeout(() => {
-      isLocalUpdateRef.current = true
-      pushState({
-        players: updatedPlayers,
-        currentPlayerIndex: shouldRollAgain ? currentPlayerIndex : nextIndex,
-        canRollAgain: shouldRollAgain,
-        winner,
-        cells,
-        endpointCells,
-        timer: timerState,
-      })
-    }, 50)
-  }
-
-  // 重新开始
-  const handleRestart = () => {
-    if (roomId && roomConfig) {
-      // 在线模式：重置玩家位置
-      const resetPlayers = players.map((p) => ({ ...p, position: 0, isSkipped: false }))
-      setPlayers(resetPlayers)
-      setCurrentPlayerIndex(0)
-      setWinner(null)
-      setCurrentTask(null)
-      setCanRollAgain(false)
-
-      const board = generateBoard(config)
-      const epCells = shuffleArray([...config.endpointCells])
-      setCells(board)
-      setEndpointCells(epCells)
-
-      setTimeout(() => {
-        isLocalUpdateRef.current = true
-        pushState({
-          players: resetPlayers,
-          currentPlayerIndex: 0,
-          canRollAgain: false,
-          winner: null,
-          cells: board,
-          endpointCells: epCells,
-          timer: { duration: 60, timeLeft: 60, isRunning: false },
-        })
-      }, 50)
+    if (!winner && !canRollAgain && !shouldRollAgain) {
+      const nextPlayer = currentPlayer === 1 ? 2 : 1
+      setCurrentPlayer(nextPlayer)
+      setIsRolling(false)
+      setTimeout(
+        () =>
+          syncStateWithOverrides({
+            currentPlayer: nextPlayer,
+            player1Position: newPlayer1Position,
+            player2Position: newPlayer2Position,
+          }),
+        100,
+      )
     } else {
-      initLocalGame(config)
+      setIsRolling(false)
+      setTimeout(
+        () =>
+          syncStateWithOverrides({
+            player1Position: newPlayer1Position,
+            player2Position: newPlayer2Position,
+          }),
+        100,
+      )
     }
   }
 
-  const handleTimerChange = useCallback(
-    (state: TimerState) => {
-      setTimerState(state)
-      if (roomId && gameStarted) {
-        isLocalUpdateRef.current = true
-        pushState({
-          players,
-          currentPlayerIndex,
-          canRollAgain,
-          winner,
-          cells,
-          endpointCells,
-          timer: state,
-        })
-      }
-    },
-    [roomId, gameStarted, players, currentPlayerIndex, canRollAgain, winner, cells, endpointCells, pushState],
-  )
+  const handleRestart = () => {
+    initGame(config)
+    setTimeout(syncState, 100)
+  }
 
-  // 计算玩家位置
-  const playerPositions = useMemo(() => {
-    const positions: { [key: number]: PlayerState[] } = {}
-    players.forEach((p) => {
-      if (!positions[p.position]) positions[p.position] = []
-      positions[p.position].push(p)
-    })
-    return positions
-  }, [players])
+  const canCurrentDeviceRoll = useCallback(() => {
+    // 本地模式下，任何时候都可以投
+    if (!roomId) return true
+    // 在线模式下，如果正在投掷则不允许
+    if (isRolling) return false
+    // 如果玩家2还没加入，不允许投掷
+    if (!player2Joined) return false
+    // 在线模式下，只有当前回合的玩家才能投掷
+    if (myPlayerNumber !== null && currentPlayer !== myPlayerNumber) return false
+    return true
+  }, [roomId, isRolling, player2Joined, myPlayerNumber, currentPlayer])
 
-  // 加载中
   if (syncEnabled === null || isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-rose-100 to-amber-100 flex items-center justify-center p-4">
@@ -517,11 +585,10 @@ export default function GamePage() {
     )
   }
 
-  // 房间选择界面
-  if (syncEnabled && !gameStarted) {
+  if (syncEnabled && (!gameStarted || (isWaitingForPlayer2 && !player2Joined))) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-rose-100 via-amber-50 to-pink-100 flex items-center justify-center p-4">
-        <div className="w-full max-w-lg">
+        <div className="w-full max-w-md">
           <h1 className="text-2xl md:text-3xl font-bold text-rose-600 text-center mb-6 flex items-center justify-center gap-2">
             <Heart className="w-6 h-6 md:w-8 md:h-8 fill-rose-500" />
             情侣飞行棋
@@ -530,40 +597,14 @@ export default function GamePage() {
             onCreateRoom={handleCreateRoom}
             onJoinRoom={handleJoinRoom}
             onPlayLocal={handlePlayLocal}
-            onSeatSelected={handleSeatSelected}
-            roomConfig={roomConfig}
-            roomId={roomId}
-            playerId={playerId}
+            waitingRoomId={roomId}
+            isWaitingForPlayer2={isWaitingForPlayer2}
+            onCheckPlayer2Joined={handleCheckPlayer2Joined}
           />
         </div>
       </div>
     )
   }
-
-  // 等待入座界面
-  if (syncEnabled && gameStarted && roomId && roomConfig && !roomConfig.seats.every((s) => s.playerId !== null)) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-rose-100 via-amber-50 to-pink-100 flex items-center justify-center p-4">
-        <div className="w-full max-w-lg">
-          <h1 className="text-2xl md:text-3xl font-bold text-rose-600 text-center mb-6 flex items-center justify-center gap-2">
-            <Heart className="w-6 h-6 md:w-8 md:h-8 fill-rose-500" />
-            情侣飞行棋
-          </h1>
-          <RoomManager
-            onCreateRoom={handleCreateRoom}
-            onJoinRoom={handleJoinRoom}
-            onPlayLocal={handlePlayLocal}
-            onSeatSelected={handleSeatSelected}
-            roomConfig={roomConfig}
-            roomId={roomId}
-            playerId={playerId}
-          />
-        </div>
-      </div>
-    )
-  }
-
-  const currentPlayer = players[currentPlayerIndex]
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-rose-100 via-amber-50 to-pink-100 p-2 md:p-4">
@@ -602,68 +643,60 @@ export default function GamePage() {
         <div className="flex flex-col lg:grid lg:grid-cols-[1fr_280px] gap-2 md:gap-3">
           {/* Side Panel */}
           <div className="order-1 lg:order-2 space-y-2 md:space-y-3">
-            {/* 玩家列表 - 移动端紧凑显示 */}
+            {/* 玩家信息 */}
             <div className="grid grid-cols-2 lg:grid-cols-1 gap-2">
-              {players.slice(0, 2).map((player, index) => (
-                <PlayerPanel
-                  key={player.id}
-                  playerIndex={index}
-                  name={player.name}
-                  gender={player.gender}
-                  position={player.position}
-                  isCurrentPlayer={currentPlayerIndex === index}
-                  totalCells={totalCells}
-                  isSkipped={player.isSkipped}
-                />
-              ))}
+              <PlayerPanel
+                playerNumber={1}
+                name={`玩家1 (${player1Gender === "male" ? "♂" : "♀"})`}
+                position={player1Position}
+                isCurrentPlayer={currentPlayer === 1}
+                totalCells={totalCells}
+                isSkipped={skipNextTurn.player1}
+              />
+              <PlayerPanel
+                playerNumber={2}
+                name={`玩家2 (${player2Gender === "male" ? "♂" : "♀"})`}
+                position={player2Position}
+                isCurrentPlayer={currentPlayer === 2}
+                totalCells={totalCells}
+                isSkipped={skipNextTurn.player2}
+              />
             </div>
-
-            {/* 更多玩家 - 紧凑模式 */}
-            {players.length > 2 && (
-              <div className="grid grid-cols-2 lg:grid-cols-2 gap-1">
-                {players.slice(2).map((player, index) => (
-                  <PlayerPanel
-                    key={player.id}
-                    playerIndex={index + 2}
-                    name={player.name}
-                    gender={player.gender}
-                    position={player.position}
-                    isCurrentPlayer={currentPlayerIndex === index + 2}
-                    totalCells={totalCells}
-                    isSkipped={player.isSkipped}
-                    compact
-                  />
-                ))}
-              </div>
-            )}
 
             {/* 骰子和计时器 */}
             <div className="grid grid-cols-2 lg:grid-cols-1 gap-2">
+              {/* Dice */}
               <div className="bg-white/90 rounded-xl p-3 md:p-4 text-center shadow-lg">
                 <p className="text-xs md:text-sm text-muted-foreground mb-1 md:mb-2">
                   {canRollAgain ? (
                     <span className="text-yellow-600 font-bold">可以再掷!</span>
-                  ) : currentPlayer ? (
+                  ) : (
                     <>
-                      <span className={currentPlayer.gender === "male" ? "text-blue-600" : "text-pink-600"}>
-                        {currentPlayer.name}
-                      </span>{" "}
+                      {currentPlayer === 1
+                        ? player1Gender === "male"
+                          ? "♂"
+                          : "♀"
+                        : player2Gender === "male"
+                          ? "♂"
+                          : "♀"}{" "}
                       的回合
                     </>
-                  ) : (
-                    "等待开始"
                   )}
                 </p>
                 <div className="flex justify-center">
-                  <Dice
-                    onRoll={handleDiceRoll}
-                    disabled={isRolling || !!currentTask || !!winner || players.length === 0}
-                    isMyTurn={isMyTurn}
-                  />
+                  <Dice onRoll={handleDiceRoll} disabled={!canCurrentDeviceRoll() || !!currentTask || !!winner} />
                 </div>
+                {roomId && isRolling && <p className="text-xs text-amber-600 mt-2 animate-pulse">投掷中...</p>}
               </div>
 
-              <GameTimer syncState={timerState} onStateChange={handleTimerChange} />
+              {/* Game Timer with sync */}
+              <GameTimer
+                syncEnabled={!!roomId}
+                syncedSeconds={timerSeconds}
+                syncedRunning={timerRunning}
+                syncedDuration={timerDuration}
+                onTimerChange={handleTimerChange}
+              />
             </div>
 
             {previewCell && (
@@ -681,14 +714,14 @@ export default function GamePage() {
               </div>
             )}
 
-            {/* 游戏规则 */}
+            {/* Game Rules */}
             <div className="hidden lg:block bg-white/70 rounded-xl p-3 text-sm">
               <h3 className="font-bold mb-2 text-rose-600">游戏规则</h3>
               <ul className="space-y-1 text-muted-foreground text-xs">
-                <li>• 玩家轮流投掷骰子前进</li>
-                <li>• 完成格子上的任务后换下一位</li>
+                <li>• 双方轮流投掷骰子前进</li>
+                <li>• 完成格子上的任务后换对方</li>
                 <li>• 不同颜色格子有不同任务类型</li>
-                <li>• 部分格子有前进/后退等效果</li>
+                <li>• 普通格子可点击"换一个"换专属任务</li>
                 <li>• 先到达终点者获胜</li>
               </ul>
             </div>
@@ -700,8 +733,9 @@ export default function GamePage() {
               cells={cells}
               endpointCells={endpointCells}
               endpointContent={config.endpointContent}
-              playerPositions={playerPositions}
-              currentPlayerIndex={currentPlayerIndex}
+              player1Position={player1Position}
+              player2Position={player2Position}
+              currentPlayer={currentPlayer}
               onCellClick={handleCellClick}
             />
 
@@ -743,13 +777,32 @@ export default function GamePage() {
         <TaskModal
           cell={currentTask}
           onComplete={handleTaskComplete}
-          playerName={currentPlayer?.name || "玩家"}
-          playerGender={currentPlayerGender}
+          playerName={
+            currentPlayer === 1
+              ? `玩家1 (${player1Gender === "male" ? "♂" : "♀"})`
+              : `玩家2 (${player2Gender === "male" ? "♂" : "♀"})`
+          }
+          currentPlayerGender={getCurrentPlayerGender()}
           config={config}
+          cellIndex={currentTaskIndex ?? undefined}
+          canChangeTask={currentTaskIndex !== null && !taskChangedCells[currentTaskIndex]}
+          onTaskChange={handleTaskChange}
         />
       )}
 
-      {showConfig && <ConfigModal config={config} onSave={handleConfigSave} onClose={() => setShowConfig(false)} />}
+      {showConfig && (
+        <ConfigModal
+          isOpen={showConfig}
+          config={config}
+          onSave={handleConfigSave}
+          onClose={() => setShowConfig(false)}
+          onReset={() => {
+            import("@/lib/game-data").then(({ defaultGameConfig }) => {
+              setConfig(defaultGameConfig)
+            })
+          }}
+        />
+      )}
 
       {winner && <WinnerModal winner={winner} reward={config.endpointContent.reward} onRestart={handleRestart} />}
     </main>

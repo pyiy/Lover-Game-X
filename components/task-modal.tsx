@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import type { GameCell, CellType, GameConfig } from "@/lib/game-data"
 import { specialCellConfigs } from "@/lib/game-data"
 import { Button } from "@/components/ui/button"
@@ -26,8 +26,11 @@ interface TaskModalProps {
   cell: GameCell | null
   onComplete: (effect?: GameCell["effect"]) => void
   playerName: string
-  playerGender?: "male" | "female"
+  currentPlayerGender?: "male" | "female"
   config?: GameConfig
+  cellIndex?: number
+  canChangeTask?: boolean
+  onTaskChange?: (newCell: GameCell) => void
 }
 
 const getCellTypeInfo = (type: CellType) => {
@@ -70,41 +73,63 @@ const getCellTypeInfo = (type: CellType) => {
   }
 }
 
-export function TaskModal({ cell, onComplete, playerName, playerGender, config }: TaskModalProps) {
+export function TaskModal({
+  cell,
+  onComplete,
+  playerName,
+  currentPlayerGender,
+  config,
+  cellIndex,
+  canChangeTask = false,
+  onTaskChange,
+}: TaskModalProps) {
   const [currentCell, setCurrentCell] = useState<GameCell | null>(cell)
-  const [hasSwapped, setHasSwapped] = useState(false)
+  const [hasChanged, setHasChanged] = useState(false)
+
+  const genderSpecificTasks = useMemo(() => {
+    if (!config || !currentPlayerGender) return []
+    return currentPlayerGender === "male" ? config.maleCells : config.femaleCells
+  }, [config, currentPlayerGender])
+
+  const [usedTaskIndices, setUsedTaskIndices] = useState<number[]>([])
+
+  const handleChangeTask = () => {
+    if (!genderSpecificTasks.length || hasChanged) return
+
+    // Find available tasks that haven't been used
+    const availableIndices = genderSpecificTasks
+      .map((_, index) => index)
+      .filter((index) => !usedTaskIndices.includes(index))
+
+    if (availableIndices.length === 0) {
+      // All tasks used, reset
+      setUsedTaskIndices([])
+      return
+    }
+
+    // Pick a random available task
+    const randomIndex = availableIndices[Math.floor(Math.random() * availableIndices.length)]
+    const newTask = genderSpecificTasks[randomIndex]
+
+    setUsedTaskIndices((prev) => [...prev, randomIndex])
+    setCurrentCell(newTask)
+    setHasChanged(true)
+    onTaskChange?.(newTask)
+  }
 
   if (!currentCell) return null
 
   const typeInfo = getCellTypeInfo(currentCell.type)
-
-  const canSwap =
-    !hasSwapped &&
-    config &&
-    playerGender &&
-    currentCell.type === "normal" &&
-    ((playerGender === "male" && config.maleCells.length > 0) ||
-      (playerGender === "female" && config.femaleCells.length > 0))
-
-  const handleSwap = () => {
-    if (!config || !playerGender || hasSwapped) return
-
-    const genderCells = playerGender === "male" ? config.maleCells : config.femaleCells
-    if (genderCells.length > 0) {
-      const randomIndex = Math.floor(Math.random() * genderCells.length)
-      const newCell = { ...genderCells[randomIndex], id: currentCell.id }
-      setCurrentCell(newCell)
-      setHasSwapped(true)
-    }
-  }
+  const showChangeButton =
+    canChangeTask && currentCell.type === "normal" && genderSpecificTasks.length > 0 && !hasChanged
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl p-4 md:p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Heart className="w-5 h-5 md:w-6 md:h-6 text-rose-500 fill-rose-500" />
-            <span className="font-bold text-base md:text-lg text-rose-600">{playerName}</span>
+            <Heart className="w-6 h-6 text-rose-500 fill-rose-500" />
+            <span className="font-bold text-lg text-rose-600">{playerName}</span>
           </div>
           <button
             onClick={() => onComplete(currentCell.effect)}
@@ -118,9 +143,9 @@ export function TaskModal({ cell, onComplete, playerName, playerGender, config }
           <span className={cn("px-4 py-1 rounded-full text-sm font-bold", typeInfo.bg)}>{typeInfo.name}</span>
         </div>
 
-        <div className={cn("p-4 md:p-6 rounded-xl text-center mb-4 md:mb-6", typeInfo.bg)}>
+        <div className={cn("p-6 rounded-xl text-center mb-6", typeInfo.bg)}>
           <div className="flex justify-center mb-4 opacity-70">{typeInfo.icon}</div>
-          <p className="text-lg md:text-xl font-bold leading-relaxed">{currentCell.content}</p>
+          <p className="text-xl font-bold leading-relaxed">{currentCell.content}</p>
 
           {/* 显示效果提示 */}
           {currentCell.effect && (
@@ -137,29 +162,31 @@ export function TaskModal({ cell, onComplete, playerName, playerGender, config }
               {currentCell.effect.type === "swap" && "完成后与对方交换位置"}
             </p>
           )}
-        </div>
 
-        <div className="flex flex-col gap-2">
-          {canSwap && (
-            <Button
-              onClick={handleSwap}
-              variant="outline"
-              className="w-full text-amber-600 border-amber-300 hover:bg-amber-50 bg-transparent"
-            >
-              <RefreshCw className="w-4 h-4 mr-2" />
-              换一个（{playerGender === "male" ? "男生" : "女生"}专属任务）
-            </Button>
-          )}
-
-          {hasSwapped && (
-            <p className="text-xs text-center text-muted-foreground">
-              已更换为{playerGender === "male" ? "男生" : "女生"}专属任务，不可再次更换
+          {hasChanged && (
+            <p className="mt-2 text-xs opacity-60">
+              已更换为{currentPlayerGender === "male" ? "男方" : "女方"}专属任务
             </p>
           )}
+        </div>
 
+        <div className="flex gap-2">
+          {showChangeButton && (
+            <Button
+              onClick={handleChangeTask}
+              variant="outline"
+              className="flex-1 text-amber-600 border-amber-300 hover:bg-amber-50 bg-transparent"
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              换一个
+            </Button>
+          )}
           <Button
             onClick={() => onComplete(currentCell.effect)}
-            className="w-full bg-rose-500 hover:bg-rose-600 text-white text-base md:text-lg py-5 md:py-6"
+            className={cn(
+              "bg-rose-500 hover:bg-rose-600 text-white text-lg py-6",
+              showChangeButton ? "flex-1" : "w-full",
+            )}
           >
             完成任务
           </Button>

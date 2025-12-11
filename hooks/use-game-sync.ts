@@ -1,58 +1,36 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import type { GameCell } from "@/lib/game-data"
-
-export interface PlayerState {
-  id: string
-  name: string
-  gender: "male" | "female"
-  position: number
-  isSkipped: boolean
-  seatIndex: number
-}
-
-export interface TimerState {
-  duration: number
-  timeLeft: number
-  isRunning: boolean
-  startedAt?: number // 计时器启动的时间戳
-  pausedAt?: number // 计时器暂停的时间戳
-}
+import type { GameCell, GameConfig } from "@/lib/game-data"
 
 export interface SyncState {
-  players: PlayerState[]
-  currentPlayerIndex: number
+  player1Position: number
+  player2Position: number
+  currentPlayer: 1 | 2
+  skipNextTurn: { player1: boolean; player2: boolean }
   canRollAgain: boolean
   winner: string | null
   cells: GameCell[]
   endpointCells: GameCell[]
-  timer: TimerState
-  lastUpdate?: number
-  version?: number
-}
-
-export interface RoomConfig {
-  maleCount: number
-  femaleCount: number
-  totalPlayers: number
-  seats: {
-    index: number
-    gender: "male" | "female"
-    playerId: string | null
-    playerName: string | null
-  }[]
+  isRolling?: boolean
+  timerSeconds?: number
+  timerRunning?: boolean
+  timerDuration?: number
+  player1Gender?: "male" | "female"
+  player2Gender?: "male" | "female"
+  taskChangedCells?: { [cellIndex: number]: boolean }
+  player2Joined?: boolean
+  config?: GameConfig
 }
 
 export function useGameSync(roomId: string | null, enabled: boolean) {
   const [isSyncing, setIsSyncing] = useState(false)
   const [isConnected, setIsConnected] = useState(true)
   const [remoteState, setRemoteState] = useState<SyncState | null>(null)
-  const [roomConfig, setRoomConfig] = useState<RoomConfig | null>(null)
   const lastUpdateRef = useRef(0)
-  const versionRef = useRef(0)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
+  // 获取远程状态
   const fetchState = useCallback(async () => {
     if (!roomId || !enabled) return
 
@@ -68,16 +46,9 @@ export function useGameSync(roomId: string | null, enabled: boolean) {
       const data = await res.json()
       setIsConnected(true)
 
-      if (data.state) {
-        const serverVersion = data.state.version || 0
-        if (serverVersion > versionRef.current || data.state.lastUpdate > lastUpdateRef.current) {
-          lastUpdateRef.current = data.state.lastUpdate
-          versionRef.current = serverVersion
-          setRemoteState(data.state)
-        }
-      }
-      if (data.roomConfig) {
-        setRoomConfig(data.roomConfig)
+      if (data.updated && data.state) {
+        lastUpdateRef.current = data.state.lastUpdate
+        setRemoteState({ ...data.state })
       }
     } catch {
       setIsConnected(false)
@@ -86,25 +57,22 @@ export function useGameSync(roomId: string | null, enabled: boolean) {
     }
   }, [roomId, enabled])
 
+  // 推送本地状态
   const pushState = useCallback(
     async (state: SyncState) => {
       if (!roomId || !enabled) return
 
       try {
         setIsSyncing(true)
-        const newVersion = versionRef.current + 1
-        const stateWithVersion = { ...state, version: newVersion }
-
         const res = await fetch("/api/game-sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ roomId, state: stateWithVersion }),
+          body: JSON.stringify({ roomId, state }),
         })
 
         if (res.ok) {
           const data = await res.json()
           lastUpdateRef.current = data.lastUpdate
-          versionRef.current = newVersion
           setIsConnected(true)
         } else {
           setIsConnected(false)
@@ -118,32 +86,28 @@ export function useGameSync(roomId: string | null, enabled: boolean) {
     [roomId, enabled],
   )
 
-  const updateSeat = useCallback(
-    async (seatIndex: number, playerId: string, playerName: string) => {
-      if (!roomId || !enabled) return false
+  const fetchStateImmediately = useCallback(async () => {
+    if (!roomId || !enabled) return null
 
-      try {
-        const res = await fetch("/api/room", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ roomId, seatIndex, playerId, playerName }),
-        })
-        if (res.ok) {
-          const data = await res.json()
-          setRoomConfig(data.roomConfig)
-          return true
-        }
-      } catch (error) {
-        console.error("更新座位失败:", error)
+    try {
+      const res = await fetch(`/api/game-sync?roomId=${roomId}&lastUpdate=0`)
+      if (!res.ok) return null
+      const data = await res.json()
+      if (data.state) {
+        lastUpdateRef.current = data.state.lastUpdate
+        setRemoteState({ ...data.state })
+        return data.state
       }
-      return false
-    },
-    [roomId, enabled],
-  )
+    } catch {
+      return null
+    }
+    return null
+  }, [roomId, enabled])
 
   useEffect(() => {
     if (!roomId || !enabled) return
 
+    // 立即获取一次
     fetchState()
 
     intervalRef.current = setInterval(fetchState, 500)
@@ -159,11 +123,8 @@ export function useGameSync(roomId: string | null, enabled: boolean) {
     isSyncing,
     isConnected,
     remoteState,
-    roomConfig,
     pushState,
-    updateSeat,
     setRemoteState,
-    setRoomConfig,
-    fetchState,
+    fetchStateImmediately,
   }
 }

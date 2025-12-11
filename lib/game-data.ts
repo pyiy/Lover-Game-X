@@ -3,42 +3,29 @@ export type CellType =
   | "start"
   | "end"
   | "endpoint-zone"
-  | "forward"
-  | "backward"
-  | "skip"
-  | "again"
-  | "truth"
-  | "dare"
-  | "kiss"
-  | "hug"
-  | "punishment"
-  | "reward"
-  | "swap"
+  | "forward" // 前进格
+  | "backward" // 后退格
+  | "skip" // 停一轮
+  | "again" // 再掷一次
+  | "truth" // 真心话
+  | "dare" // 大冒险
+  | "kiss" // 亲亲格
+  | "hug" // 抱抱格
+  | "punishment" // 惩罚格
+  | "reward" // 奖励格
+  | "swap" // 交换位置
+
+export type GenderType = "male" | "female" | "both"
 
 export interface GameCell {
   id: number
   content: string
   type: CellType
-  player?: "male" | "female" | "both"
+  player?: GenderType
   effect?: {
     type: "move" | "skip" | "again" | "swap"
     value?: number
   }
-}
-
-export interface Player {
-  id: string
-  name: string
-  gender: "male" | "female"
-  position: number
-  isSkipped: boolean
-  seatIndex: number
-}
-
-export interface RoomConfig {
-  maleCount: number
-  femaleCount: number
-  totalPlayers: number
 }
 
 export interface SpecialCellConfig {
@@ -99,24 +86,6 @@ export const specialCellConfigs: SpecialCellConfig[] = [
   },
 ]
 
-export const defaultMaleCells: GameCell[] = [
-  { id: 1001, content: "男生做20个俯卧撑", type: "dare", player: "male" },
-  { id: 1002, content: "男生单膝下跪说告白词", type: "dare", player: "male" },
-  { id: 1003, content: "男生公主抱女生转一圈", type: "dare", player: "male" },
-  { id: 1004, content: "男生模仿大猩猩", type: "dare", player: "male" },
-  { id: 1005, content: "男生说出最想对女生做的事", type: "truth", player: "male" },
-  { id: 1006, content: "男生第一次心动的瞬间", type: "truth", player: "male" },
-]
-
-export const defaultFemaleCells: GameCell[] = [
-  { id: 2001, content: "女生跳一段可爱的舞", type: "dare", player: "female" },
-  { id: 2002, content: "女生撒娇说人家不依啦", type: "dare", player: "female" },
-  { id: 2003, content: "女生比心加wink", type: "dare", player: "female" },
-  { id: 2004, content: "女生用萌音说一句情话", type: "dare", player: "female" },
-  { id: 2005, content: "女生说出最喜欢男生哪里", type: "truth", player: "female" },
-  { id: 2006, content: "女生描述理想中的约会", type: "truth", player: "female" },
-]
-
 // 默认普通格子内容
 export const defaultNormalCells: GameCell[] = [
   { id: 1, content: "为对方做一次肩部按摩30秒", type: "normal", player: "both" },
@@ -135,6 +104,28 @@ export const defaultNormalCells: GameCell[] = [
   { id: 14, content: "互相说出3个喜欢对方的地方", type: "normal", player: "both" },
   { id: 15, content: "给对方一个公主抱/熊抱", type: "normal", player: "both" },
   { id: 16, content: "模仿对方的一个可爱动作", type: "normal", player: "both" },
+]
+
+export const defaultMaleCells: GameCell[] = [
+  { id: 1001, content: "做20个俯卧撑", type: "normal", player: "male" },
+  { id: 1002, content: "单膝跪地向女方表白", type: "normal", player: "male" },
+  { id: 1003, content: "公主抱女方转一圈", type: "normal", player: "male" },
+  { id: 1004, content: "用最帅的声音说我爱你", type: "normal", player: "male" },
+  { id: 1005, content: "为女方按摩双脚2分钟", type: "normal", player: "male" },
+  { id: 1006, content: "模仿霸道总裁说一段台词", type: "normal", player: "male" },
+  { id: 1007, content: "为女方倒一杯水并喂她喝", type: "normal", player: "male" },
+  { id: 1008, content: "做30个深蹲", type: "normal", player: "male" },
+]
+
+export const defaultFemaleCells: GameCell[] = [
+  { id: 2001, content: "撒娇说一句我想你了", type: "normal", player: "female" },
+  { id: 2002, content: "跳一段可爱的舞蹈", type: "normal", player: "female" },
+  { id: 2003, content: "用嗲嗲的声音叫老公", type: "normal", player: "female" },
+  { id: 2004, content: "做一个可爱的表情并拍照", type: "normal", player: "female" },
+  { id: 2005, content: "给男方一个爱的抱抱", type: "normal", player: "female" },
+  { id: 2006, content: "用萌萌的声音说我爱你", type: "normal", player: "female" },
+  { id: 2007, content: "亲吻男方的手背", type: "normal", player: "female" },
+  { id: 2008, content: "模仿小猫叫三声", type: "normal", player: "female" },
 ]
 
 // 真心话格子内容
@@ -156,7 +147,9 @@ export const defaultDareCells: GameCell[] = [
   { id: 203, content: "表演一段即兴舞蹈", type: "dare", player: "both" },
   { id: 204, content: "用肢体语言表演一部电影", type: "dare", player: "both" },
   { id: 205, content: "闭眼画对方的画像", type: "dare", player: "both" },
-  { id: 206, content: "用方言说一段告白", type: "dare", player: "both" },
+  { id: 206, content: "男生做10个俯卧撑", type: "dare", player: "male" },
+  { id: 207, content: "女生跳一段可爱的舞", type: "dare", player: "female" },
+  { id: 208, content: "用方言说一段告白", type: "dare", player: "both" },
 ]
 
 // 亲亲格子内容
@@ -226,6 +219,8 @@ export const defaultEndpointContent = {
 // 完整的游戏配置
 export interface GameConfig {
   normalCells: GameCell[]
+  maleCells: GameCell[]
+  femaleCells: GameCell[]
   truthCells: GameCell[]
   dareCells: GameCell[]
   kissCells: GameCell[]
@@ -234,15 +229,15 @@ export interface GameConfig {
   rewardCells: GameCell[]
   effectCells: GameCell[]
   endpointCells: GameCell[]
-  maleCells: GameCell[]
-  femaleCells: GameCell[]
   endpointContent: typeof defaultEndpointContent
-  boardSize: number
-  specialCellPositions: { [position: number]: CellType }
+  boardSize: number // 棋盘总格子数（不含起点终点）
+  specialCellPositions: { [position: number]: CellType } // 特殊格子固定位置
 }
 
 export const defaultGameConfig: GameConfig = {
   normalCells: defaultNormalCells,
+  maleCells: defaultMaleCells,
+  femaleCells: defaultFemaleCells,
   truthCells: defaultTruthCells,
   dareCells: defaultDareCells,
   kissCells: defaultKissCells,
@@ -251,11 +246,10 @@ export const defaultGameConfig: GameConfig = {
   rewardCells: defaultRewardCells,
   effectCells: defaultEffectCells,
   endpointCells: defaultEndpointCells,
-  maleCells: defaultMaleCells,
-  femaleCells: defaultFemaleCells,
   endpointContent: defaultEndpointContent,
-  boardSize: 48,
+  boardSize: 48, // 更大的棋盘
   specialCellPositions: {
+    // 固定某些位置为特殊格子类型
     5: "truth",
     10: "forward",
     15: "dare",
@@ -285,8 +279,9 @@ export function shuffleArray<T>(array: T[]): T[] {
 export function generateBoard(config: GameConfig): GameCell[] {
   const board: GameCell[] = []
 
+  // 准备各类型格子的池
   const pools: { [key in CellType]?: GameCell[] } = {
-    normal: shuffleArray([...config.normalCells]),
+    normal: shuffleArray([...config.normalCells, ...config.maleCells, ...config.femaleCells]),
     truth: shuffleArray([...config.truthCells]),
     dare: shuffleArray([...config.dareCells]),
     kiss: shuffleArray([...config.kissCells]),
@@ -312,6 +307,7 @@ export function generateBoard(config: GameConfig): GameCell[] {
     return { ...pool[index] }
   }
 
+  // 生成棋盘
   for (let i = 1; i <= config.boardSize; i++) {
     const fixedType = config.specialCellPositions[i]
 
@@ -323,6 +319,7 @@ export function generateBoard(config: GameConfig): GameCell[] {
         board.push({ id: i, content: "休息一下", type: "normal", player: "both" })
       }
     } else {
+      // 随机分配普通格子或随机特殊格子
       const random = Math.random()
       let cell: GameCell | null = null
 
@@ -351,21 +348,4 @@ export function generateBoard(config: GameConfig): GameCell[] {
   }
 
   return board
-}
-
-export function getCellContentForPlayer(cell: GameCell, playerGender: "male" | "female", config: GameConfig): GameCell {
-  // 如果是通用格子，直接返回
-  if (cell.player === "both") return cell
-
-  // 如果格子性别与玩家性别匹配，返回原格子
-  if (cell.player === playerGender) return cell
-
-  // 否则从对应性别的格子池中随机选一个
-  const genderCells = playerGender === "male" ? config.maleCells : config.femaleCells
-  if (genderCells.length > 0) {
-    const randomCell = genderCells[Math.floor(Math.random() * genderCells.length)]
-    return { ...randomCell, id: cell.id }
-  }
-
-  return cell
 }
